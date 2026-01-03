@@ -47,20 +47,28 @@ Before packaging, ensure ASPX files are clean:
 
 **Check Page directives:**
 ```aspx
-<%@ Page Language="C#" ... %>
+<%@ Page Language="C#" MasterPageFile="~/MasterPages/FormDetail.master"
+    AutoEventWireup="true" ValidateRequest="false" Title="Screen Title"
+    Inherits="PX.Web.UI.PXPage" %>
 ```
-- ✅ MUST have: `Language="C#"`, `AutoEventWireup="true"`, `MasterPageFile="~/MasterPages/FormTab.master"`
+- ✅ MUST have: `Language="C#"`, `AutoEventWireup="true"`, `MasterPageFile="~/MasterPages/*.master"`
+- ✅ **MUST have: `Inherits="PX.Web.UI.PXPage"`** - This is the base class, NOT optional!
 - ❌ MUST NOT have: `CodeFile="*.aspx.cs"` - Remove it!
-- ❌ MUST NOT have: `Inherits="Page_*"` - Remove it!
-- ✅ Reason: Acumatica uses PXGraph pattern, not code-behind
+- ❌ MUST NOT have: `Inherits="Page_AS201000"` (class name) - Use base class instead!
+- ✅ The difference:
+  - `Inherits="Page_AS201000"` = code-behind class (WRONG - doesn't exist)
+  - `Inherits="PX.Web.UI.PXPage"` = base class inheritance (CORRECT)
+- ✅ Reason: Acumatica uses PXGraph pattern, not code-behind. The graph is in TypeName, not Inherits.
 
 **Check PXDataSource:**
 ```aspx
 <px:PXDataSource ID="ds" runat="server"
-    TypeName="YourNamespace.Graph.YourGraphMaint"
+    TypeName="YourNamespace.Graph.YourGraphMaint, YourAssembly"
     PrimaryView="ViewName">
 ```
-- ✅ TypeName MUST exactly match the Graph class namespace
+- ✅ **TypeName MUST be assembly-qualified**: `Namespace.Class, AssemblyName`
+  - Example: `TypeName="AcuSales.Graph.Maintenance.TerritoryMaint, AcuSales.Core"`
+  - NOT: `TypeName="AcuSales.Graph.Maintenance.TerritoryMaint"` (missing assembly!)
 - ✅ PrimaryView MUST exactly match a public view in the Graph class
 - Example: If graph has `public PXFilter<MyFilter> Filter;` → use `PrimaryView="Filter"`
 - ❌ Common mistake: ASPX says `PrimaryView="Filter"` but graph has `Stats` → screens redirect to 00000000!
@@ -102,13 +110,17 @@ Create `project.xml` at the ROOT of the zip (not in a subdirectory!) with this s
 ```xml
 <!-- List ALL files with AppRelativePath using BACKSLASHES -->
 <File AppRelativePath="Bin\YourCustom.dll" />
-<File AppRelativePath="Pages\XX101000.aspx" />
+<File AppRelativePath="Frames\XX101000.aspx" />
 <File AppRelativePath="Scripts\InitDatabase.sql" />
 <File AppRelativePath="Scripts\assets\bundle.js" />
 ```
 - ✅ Use backslashes: `Bin\file.dll` (Windows style)
 - ❌ NOT forward slashes: `Bin/file.dll`
 - ✅ List EVERY file that will be in the zip
+- ⚠️ **CRITICAL: Folder name MUST match URL path!**
+  - If URL is `~/Frames/XX101000.aspx` → use `Frames\` folder
+  - If URL is `~/Pages/XX101000.aspx` → use `Pages\` folder
+  - Mismatch = "file does not exist" errors!
 
 **ScreenWithRights section (for each custom screen):**
 ```xml
@@ -207,7 +219,7 @@ YourCustomization.zip
 ├── project.xml              ← ROOT LEVEL! Not in _project/!
 ├── Bin/
 │   └── YourCustom.dll
-├── Pages/
+├── Frames/                  ← Use Frames\ for ~/Frames/ URLs!
 │   ├── XX101000.aspx
 │   └── XX102000.aspx
 └── Scripts/
@@ -216,6 +228,11 @@ YourCustomization.zip
         ├── bundle.js
         └── styles.css
 ```
+
+⚠️ **The folder name MUST match the URL path in SiteMap!**
+- Standard Acumatica screens use `~/Frames/`
+- If your Url is `~/Frames/XX101000.aspx`, files go in `Frames\`
+- If your Url is `~/Pages/XX101000.aspx`, files go in `Pages\`
 
 **PowerShell build script:**
 ```powershell
@@ -233,8 +250,8 @@ Copy-Item 'project.xml' "$temp\project.xml"
 New-Item -ItemType Directory -Path "$temp\Bin" -Force | Out-Null
 Copy-Item 'YourProject\bin\Release\YourCustom.dll' "$temp\Bin\"
 
-# Copy ASPX pages
-Copy-Item 'Pages' "$temp\Pages" -Recurse
+# Copy ASPX pages (use Frames to match ~/Frames/ URLs!)
+Copy-Item 'Frames' "$temp\Frames" -Recurse
 
 # Copy Scripts
 Copy-Item 'Scripts' "$temp\Scripts" -Recurse
@@ -274,17 +291,21 @@ if (-not $hasProjectXml) {
 
 **ASPX validation:**
 ```powershell
-$aspxFiles = Get-ChildItem 'verify-temp\Pages\*.aspx'
+$aspxFiles = Get-ChildItem 'verify-temp\Frames\*.aspx'
 foreach ($file in $aspxFiles) {
     $content = Get-Content $file.FullName -Raw
     if ($content -match 'CodeFile=') {
-        Write-Error "Found CodeFile in $($file.Name)"
+        Write-Error "Found CodeFile in $($file.Name) - REMOVE IT"
     }
     if ($content -match 'Inherits="Page_') {
-        Write-Error "Found Inherits in $($file.Name)"
+        Write-Error "Found wrong Inherits in $($file.Name) - use 'PX.Web.UI.PXPage'"
     }
-    if ($content -match '<!--(?!.*<Template>)') {
-        Write-Error "Found HTML comment in $($file.Name)"
+    if ($content -notmatch 'Inherits="PX\.Web\.UI\.PXPage"') {
+        Write-Error "Missing Inherits='PX.Web.UI.PXPage' in $($file.Name)"
+    }
+    # Check for assembly-qualified TypeName
+    if ($content -match 'TypeName="([^"]+)"' -and $Matches[1] -notmatch ',') {
+        Write-Error "TypeName missing assembly name in $($file.Name) - use 'Namespace.Class, AssemblyName'"
     }
 }
 ```
@@ -328,10 +349,15 @@ If ASPPARSE errors during publish:
 2. **Empty level**: `level=""` instead of `level="0"` or `level="1"`
 3. **Missing GraphType**: Screens won't register without it
 4. **PrimaryView mismatch**: ASPX says "Filter" but graph has "Stats"
-5. **CodeFile/Inherits**: Causes ASPPARSE errors during publish
-6. **HTML comments in collections**: Breaks ASPX validation
-7. **Wrong path slashes**: `Bin/file.dll` instead of `Bin\file.dll`
-8. **Invalid properties**: Like `ParentField` on PXTreeItemBinding
+5. **Missing Inherits**: MUST have `Inherits="PX.Web.UI.PXPage"` - causes "page should be inherited from PXPage" error
+6. **Wrong Inherits**: `Inherits="Page_AS201000"` (class) instead of `Inherits="PX.Web.UI.PXPage"` (base)
+7. **CodeFile attribute**: `CodeFile="AS201000.aspx.cs"` - causes "file does not exist" errors
+8. **Missing assembly in TypeName**: `TypeName="Namespace.Class"` instead of `TypeName="Namespace.Class, AssemblyName"`
+9. **Folder/URL mismatch**: Files in `Pages\` but URL uses `~/Frames/` - causes "file does not exist"
+10. **HTML comments in collections**: Breaks ASPX validation
+11. **Wrong path slashes**: `Bin/file.dll` instead of `Bin\file.dll`
+12. **Invalid properties**: Like `ParentField` on PXTreeItemBinding
+13. **Stale cached files**: Old ASPX still deployed in Acumatica - need to manually delete from `C:\Program Files\Acumatica ERP\AcumaticaERP\Frames\`
 
 ### ✅ Success Checklist
 
@@ -340,12 +366,14 @@ Before delivering package, verify:
 - [ ] project.xml at zip root (not in subdirectory)
 - [ ] level="0" or level="1" (not empty)
 - [ ] All File AppRelativePath use backslashes
+- [ ] **Folder name matches URL path** (Frames\ for ~/Frames/)
 - [ ] All screens have ScreenWithRights entries
 - [ ] All screens have SiteMapNode entries
 - [ ] All GraphType attributes match C# namespaces exactly
 - [ ] All PrimaryView attributes match graph view names exactly
 - [ ] No CodeFile attributes in ASPX Page directives
-- [ ] No Inherits attributes in ASPX Page directives
+- [ ] **All ASPX have `Inherits="PX.Web.UI.PXPage"`** (base class, NOT class name!)
+- [ ] **All TypeName are assembly-qualified** (`Namespace.Class, AssemblyName`)
 - [ ] No HTML comments between control collection items
 - [ ] No invalid control properties
 - [ ] Unique NodeID (GUID) for each screen
@@ -389,9 +417,9 @@ if (Test-Path "$ProjectPath\bin\Release\$DllName") {
     Copy-Item "$ProjectPath\bin\Release\$DllName" "$temp\Bin\"
 }
 
-# Copy Pages
-if (Test-Path "$ProjectPath\Pages") {
-    Copy-Item "$ProjectPath\Pages" "$temp\Pages" -Recurse
+# Copy ASPX pages (Frames folder for ~/Frames/ URLs)
+if (Test-Path "$ProjectPath\Frames") {
+    Copy-Item "$ProjectPath\Frames" "$temp\Frames" -Recurse
 }
 
 # Copy Scripts
@@ -400,12 +428,16 @@ if (Test-Path "$ProjectPath\Scripts") {
 }
 
 # Validate ASPX files
-if (Test-Path "$temp\Pages") {
+if (Test-Path "$temp\Frames") {
     $issues = @()
-    Get-ChildItem "$temp\Pages\*.aspx" | ForEach-Object {
+    Get-ChildItem "$temp\Frames\*.aspx" | ForEach-Object {
         $content = Get-Content $_.FullName -Raw
-        if ($content -match 'CodeFile=') { $issues += "$($_.Name): has CodeFile attribute" }
-        if ($content -match 'Inherits="Page_') { $issues += "$($_.Name): has Inherits attribute" }
+        if ($content -match 'CodeFile=') { $issues += "$($_.Name): has CodeFile attribute - REMOVE" }
+        if ($content -match 'Inherits="Page_') { $issues += "$($_.Name): wrong Inherits class - use 'PX.Web.UI.PXPage'" }
+        if ($content -notmatch 'Inherits="PX\.Web\.UI\.PXPage"') { $issues += "$($_.Name): missing Inherits='PX.Web.UI.PXPage'" }
+        if ($content -match 'TypeName="([^"]+)"') {
+            if ($Matches[1] -notmatch ',') { $issues += "$($_.Name): TypeName missing assembly - use 'Namespace.Class, AssemblyName'" }
+        }
     }
     if ($issues) {
         Write-Error "ASPX validation failed:`n$($issues -join "`n")"
@@ -442,3 +474,63 @@ if (Test-Path "$PackageName.zip") {
 6. **Provide import instructions** to the user
 
 Remember: Build it right the first time. No "Object reference not set" errors, no ASPPARSE errors, no screen redirects to 00000000.
+
+## Debugging When Things Go Wrong
+
+When package import or publish fails, check these locations:
+
+### Acumatica Logs
+```
+C:\Program Files\Acumatica ERP\AcumaticaERP\App_Data\Logs\
+```
+- Look for recent .log files
+- Search for ERROR, Exception, or your screen ID
+
+### Windows Event Viewer
+```powershell
+# Check Application log for ASP.NET errors
+Get-WinEvent -LogName Application -MaxEvents 50 | Where-Object { $_.Message -like "*Acumatica*" -or $_.Message -like "*ASP.NET*" }
+```
+
+### SQL Server Logs
+```sql
+-- Check for recent errors
+SELECT TOP 50 * FROM sys.dm_exec_requests WHERE status = 'suspended'
+-- Check custom table existence
+SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME LIKE 'AS%'
+```
+
+### Request Trace in Acumatica
+1. Navigate to SM201500 (Request Profiler)
+2. Start profiling
+3. Reproduce the error
+4. Stop and review exceptions
+
+### Common Error Patterns
+
+| Error Message | Likely Cause | Fix |
+|--------------|--------------|-----|
+| "page should be inherited from PXPage" | Missing `Inherits="PX.Web.UI.PXPage"` | Add to Page directive |
+| "file does not exist" | CodeFile attribute or path mismatch | Remove CodeFile, check Frames vs Pages |
+| "ScreenId=00000000" | PrimaryView mismatch or no SiteMap entry | Verify view name, check ScreenWithRights |
+| "Object reference not set" | Empty level attribute or corrupt project.xml | Set level="0" or level="1" |
+| "Nullable object must have a value" | Acumatica state issue, not package | Try: unpublish all, clear cache, republish |
+| "Graph type not found" | Wrong namespace or missing assembly in TypeName | Use full `Namespace.Class, Assembly` |
+
+### Clean Slate Recovery
+When nothing else works:
+```powershell
+# 1. Stop IIS
+iisreset /stop
+
+# 2. Delete cached ASPX from Acumatica folder
+Remove-Item "C:\Program Files\Acumatica ERP\AcumaticaERP\Frames\AS*.aspx" -Force
+
+# 3. Clear Acumatica temp files
+Remove-Item "C:\Program Files\Acumatica ERP\AcumaticaERP\App_RuntimeCode\*" -Recurse -Force
+
+# 4. Restart IIS
+iisreset /start
+
+# 5. In Acumatica: SM204505 > Unpublish All > Re-import package > Publish
+```
