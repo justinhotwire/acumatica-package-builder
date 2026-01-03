@@ -1,6 +1,6 @@
 {
   "name": "acumatica-package-builder",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Build Acumatica customization packages correctly from source code - generates proper project.xml, validates ASPX files, and creates deployment-ready zip packages",
   "author": "Claude",
   "triggers": {

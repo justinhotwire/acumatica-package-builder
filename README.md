@@ -256,7 +256,7 @@ When updating this skill:
 
 ## Version History
 
-- **1.0.0** (2026-01-02)
+- **0.1.0** (2026-01-02)
   - Initial release
   - Supports Acumatica 24.200.0010+
   - Builds packages with proper structure
