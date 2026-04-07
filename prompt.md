@@ -2,6 +2,88 @@
 
 You are an expert at building Acumatica ERP customization packages from source code. Your job is to create deployment-ready zip packages that import and publish correctly the first time, with no errors.
 
+## Direct SQL Upload (Bypass SM204505)
+
+When the SM204505 UI is buggy or you need faster deployment, use direct SQL upload:
+
+```powershell
+# Preview what would be uploaded (WhatIf mode)
+powershell -ExecutionPolicy Bypass -File "c:\Users\JustinBoyd\.claude\skills\acumatica-package-builder\direct-upload.ps1" -PackagePath "YourPackage.zip" -WhatIf
+
+# Upload directly to database
+powershell -ExecutionPolicy Bypass -File "c:\Users\JustinBoyd\.claude\skills\acumatica-package-builder\direct-upload.ps1" -PackagePath "YourPackage.zip"
+
+# Force overwrite existing project
+powershell -ExecutionPolicy Bypass -File "c:\Users\JustinBoyd\.claude\skills\acumatica-package-builder\direct-upload.ps1" -PackagePath "YourPackage.zip" -Force
+
+# Custom database connection
+powershell -ExecutionPolicy Bypass -File "c:\Users\JustinBoyd\.claude\skills\acumatica-package-builder\direct-upload.ps1" -PackagePath "YourPackage.zip" -Server "myserver" -Database "AcumaticaDB" -Username "sa" -Password "mypass"
+
+# Upload AND open browser to publish
+powershell -ExecutionPolicy Bypass -File "c:\Users\JustinBoyd\.claude\skills\acumatica-package-builder\direct-upload.ps1" -PackagePath "YourPackage.zip" -Force -OpenBrowser
+
+# FULL AUTOMATION: Upload AND auto-click Publish (uses Selenium)
+powershell -ExecutionPolicy Bypass -File "c:\Users\JustinBoyd\.claude\skills\acumatica-package-builder\direct-upload.ps1" -PackagePath "YourPackage.zip" -Force -AutoPublish
+```
+
+**Automation options:**
+- `-OpenBrowser` - Opens SM204505 in browser, you click Publish
+- `-AutoPublish` - Uses Selenium to login, select project, and click Publish automatically (requires Chrome)
+- `-RestartIIS` - Runs `iisreset` after publishing to ensure changes take effect
+
+## Screen Testing (After Deployment)
+
+Test custom screens for errors after deployment:
+
+```powershell
+# Test default screens (AS301000, AS302000, AS401500)
+powershell -ExecutionPolicy Bypass -File "c:\Users\JustinBoyd\.claude\skills\acumatica-package-builder\test-screens.ps1"
+
+# Test specific screens
+powershell -ExecutionPolicy Bypass -File "c:\Users\JustinBoyd\.claude\skills\acumatica-package-builder\test-screens.ps1" -ScreenIDs @("AS301000", "AS302000")
+
+# Custom Acumatica URL and credentials
+powershell -ExecutionPolicy Bypass -File "c:\Users\JustinBoyd\.claude\skills\acumatica-package-builder\test-screens.ps1" -AcumaticaUrl "http://myserver/AcumaticaERP" -Username "admin" -Password "secret"
+```
+
+**What test-screens.ps1 does:**
+1. Logs into Acumatica via REST API
+2. Requests each screen and checks for HTTP errors
+3. Scans response for error keywords
+4. Opens screens in browser for visual verification
+5. Reports any issues found
+
+## Complete Deployment Workflow
+
+For a full build-deploy-test cycle:
+
+```powershell
+# 1. Build package (if needed)
+# Your build script here...
+
+# 2. Upload, auto-publish, restart IIS
+powershell -ExecutionPolicy Bypass -File "c:\Users\JustinBoyd\.claude\skills\acumatica-package-builder\direct-upload.ps1" -PackagePath "YourPackage.zip" -Force -AutoPublish -RestartIIS
+
+# 3. Test the screens
+powershell -ExecutionPolicy Bypass -File "c:\Users\JustinBoyd\.claude\skills\acumatica-package-builder\test-screens.ps1" -ScreenIDs @("XX101000", "XX102000")
+
+# 4. If errors found, fix code, rebuild, and repeat from step 1
+```
+
+**One-liner for iterative development:**
+```powershell
+# Upload + Publish + IIS Reset + Test (all in one)
+$pkg = "YourPackage.zip"; `
+& "c:\Users\JustinBoyd\.claude\skills\acumatica-package-builder\direct-upload.ps1" -PackagePath $pkg -Force -AutoPublish -RestartIIS; `
+& "c:\Users\JustinBoyd\.claude\skills\acumatica-package-builder\test-screens.ps1" -ScreenIDs @("XX101000")
+```
+
+**Database schema used:**
+- `CustProject` - project metadata
+- `CustObject` - file references with XML content
+- `UploadFile` - file metadata
+- `UploadFileRevision` - actual binary content
+
 ## When to Use This Skill
 
 Invoke this skill when:
